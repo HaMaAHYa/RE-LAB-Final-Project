@@ -4,7 +4,7 @@ import numpy as np
 # 1. Load the CSV file
 df = pd.read_csv('../Assignment/conveyor/cup_trajectory_data.csv')
 
-start_time = 0.5
+start_time = 0
 end_time = 10.0
 
 # 2. Filter data by time

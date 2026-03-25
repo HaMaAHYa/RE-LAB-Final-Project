@@ -399,19 +399,13 @@ GRIPPER_VEL = 0.0
 
 # Motion duration (seconds) and timestep
 DT         = 0.05      # must match CoppeliaSim simulation timestep
-TARGET_DUR = [i * DT for i in range(N)][-1] + 0.03
+TARGET_DUR = [i * DT for i in range(N)][-1] + 1.5
 
 joint_handles = [sim.getObject(f'{TARGET_ARM}/joint{i+1}') for i in range(6)]
 
 N_STEPS = int(TARGET_DUR / DT)
 times   = [i * DT for i in range(N_STEPS)]
 
-# ── Start simulation ──────────────────────────────────────────────
-sim.startSimulation()
-while sim.getSimulationState() != sim.simulation_advancing_running:
-    time.sleep(0.1)
-print("Simulation running.") 
-wait_for_movement(sim, 'ready')
 # ── Read current state ────────────────────────────────────────────
 q_sim_current = np.array([sim.getJointPosition(h) for h in joint_handles])
 q_dh_current  = JOINT_SIGN * q_sim_current
@@ -459,6 +453,14 @@ configs_sim = resample_to_n(ik_configs_sim, N_STEPS)
 
 # 4. Send the single continuous motion to CoppeliaSim
 move_id = 'waypoint_path_smoothed'
+
+# ── Start simulation ──────────────────────────────────────────────
+sim.startSimulation()
+while sim.getSimulationState() != sim.simulation_advancing_running:
+    time.sleep(0.1)
+print("Simulation running.") 
+wait_for_movement(sim, 'ready')
+
 print(f"\nSending full trajectory to CoppeliaSim (Duration: {TARGET_DUR}s)...")
 dispatch(sim, configs_sim, times, move_id, gripper_vel=GRIPPER_VEL)
 
