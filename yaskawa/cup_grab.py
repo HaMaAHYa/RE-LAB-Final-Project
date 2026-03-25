@@ -4,11 +4,10 @@ Yaskawa GP8 — IK Solver (Position Only) → CoppeliaSim
 Solves IK for a target TCP position only (no orientation constraint),
 then sends the resulting joint trajectory to CoppeliaSim.
 
-It also able to calculate waypoints along a straight-line Cartesian path, solve IK at each, and send the whole trajectory to CoppeliaSim.
-
 Usage
 -----
 Edit TARGET_POS at the top, then run with CoppeliaSim open:
+    python ik_to_sim_pos_only.py
 """
 
 from coppeliasim_zmqremoteapi_client import RemoteAPIClient
@@ -233,9 +232,47 @@ TCP = sim.getObjectPosition(sim.getObject('/gripperEF'))
 TARGET_POS    = np.array(TCP)   # metres (x, y, z)
 
 TARGETS = [
-    np.array([0.640, -0.1, 0.51507]),
-    np.array([0.640,  0.1, 0.51507]),
-    np.array([0.640,  0.0, 0.71507]),
+    np.array([0.022485, -0.699487, 0.448029]),
+np.array([0.02489, -0.695197, 0.447059]),
+np.array([0.027313, -0.690917, 0.446089]),
+np.array([0.029748, -0.68664, 0.445118]),
+np.array([0.032217, -0.682381, 0.444148]),
+np.array([0.03482, -0.678212, 0.443181]),
+np.array([0.037557, -0.674124, 0.442218]),
+np.array([0.040327, -0.670062, 0.441256]),
+np.array([0.043105, -0.666005, 0.440292]),
+np.array([0.045906, -0.661954, 0.439331]),
+np.array([0.048711, -0.657911, 0.438367]),
+np.array([0.051608, -0.653932, 0.437408]),
+np.array([0.054644, -0.650062, 0.436456]),
+np.array([0.057756, -0.646252, 0.435509]),
+np.array([0.060887, -0.642457, 0.434562]),
+np.array([0.064028, -0.638676, 0.433614]),
+np.array([0.067197, -0.634895, 0.432668]),
+np.array([0.07038, -0.63113, 0.431722]),
+np.array([0.073671, -0.627479, 0.430783]),
+np.array([0.077104, -0.623945, 0.429857]),
+np.array([0.080566, -0.620448, 0.428932]),
+np.array([0.084036, -0.61695, 0.428007]),
+np.array([0.087525, -0.61347, 0.427083]),
+np.array([0.091028, -0.609992, 0.42616]),
+np.array([0.094594, -0.60659, 0.425242]),
+np.array([0.098285, -0.603325, 0.424339]),
+np.array([0.102058, -0.600156, 0.423445]),
+np.array([0.10585, -0.597005, 0.422554]),
+np.array([0.109646, -0.593869, 0.421661]),
+np.array([0.113475, -0.590743, 0.420771]),
+np.array([0.117305, -0.587619, 0.419881]),
+np.array([0.121218, -0.584619, 0.419002]),
+np.array([0.125259, -0.581778, 0.418144]),
+np.array([0.129322, -0.57898, 0.417289]),
+np.array([0.133397, -0.576187, 0.416436]),
+np.array([0.137485, -0.573406, 0.415583]),
+np.array([0.141587, -0.570641, 0.41473]),
+np.array([0.145725, -0.567935, 0.413884]),
+np.array([0.149943, -0.565361, 0.413055]),
+np.array([0.154232, -0.562897, 0.41224]),
+np.array([0.158533, -0.560453, 0.411428])
 ]
 
 
@@ -263,56 +300,59 @@ while sim.getSimulationState() != sim.simulation_advancing_running:
     time.sleep(0.1)
 print("Simulation running.")
 wait_for_movement(sim, 'ready')
-
-
 # ── Read current state ────────────────────────────────────────────
 q_sim_current = np.array([sim.getJointPosition(h) for h in joint_handles])
 q_dh_current  = JOINT_SIGN * q_sim_current
-pos_start, R_start = fk(q_dh_current)
-ro0, pi0, ya0 = R_to_rpy(R_start)
 
-move_count = 0
+# Get the actual starting Cartesian position of the robot
+pos_start, _ = fk(q_dh_current)
 
-for idx, TARGET_POS in enumerate(TARGETS):
+# We will store the full joint-space path here
+ik_configs_dh = [q_dh_current.copy()]
+q_seed = q_dh_current.copy()
 
-    print("\n" + "=" * 55)
-    print(f"Moving to target {idx+1}: {TARGET_POS.tolist()}")
+print("\n--- Phase 1: Smooth approach to the first waypoint ---")
+# Use your existing function to interpolate from current pos to TARGETS[0]
+approach_configs = build_cartesian_trajectory(
+    pos_start  = pos_start,
+    pos_target = TARGETS[0],
+    q_seed     = q_seed,
+    n_ik       = IK_STEPS  # Default is 40 steps from your helper functions
+)
 
-    # --- Read current state (IMPORTANT: update every loop) ---
-    q_sim_current = np.array([sim.getJointPosition(h) for h in joint_handles])
-    q_dh_current  = JOINT_SIGN * q_sim_current
-    pos_start, _  = fk(q_dh_current)
+# Add the approach path to our main trajectory list
+ik_configs_dh.extend(approach_configs)
 
-    # --- Reachability check ---
-    print("Checking reachability ...")
-    q_check = inverse_kinematics_pos(TARGET_POS, q_dh_current)
-    pos_check, _ = fk(q_check)
-    fk_err = np.linalg.norm(TARGET_POS - pos_check)
-    print(f"  FK check: {np.round(pos_check, 4).tolist()}  err={fk_err:.4f} m")
+# Update the IK seed to the last position of the approach path
+q_seed = approach_configs[-1].copy()
 
-    # --- Build trajectory ---
-    print(f"Solving IK path ({IK_STEPS} waypoints)...")
-    ik_configs_dh = build_cartesian_trajectory(
-        pos_start  = pos_start,
-        pos_target = TARGET_POS,
-        q_seed     = q_dh_current,
-        n_ik       = IK_STEPS,
-    )
+print(f"\n--- Phase 2: Solving IK for the remaining {len(TARGETS)-1} waypoints ---")
+# Loop through the REST of the targets, starting from index 1
+for idx in range(1, len(TARGETS)):
+    target_pos = TARGETS[idx]
+    q_ik = inverse_kinematics_pos(target_pos, q_seed)
+    ik_configs_dh.append(q_ik.copy())
+    q_seed = q_ik.copy() # Update seed for the next point
+    
+    if idx % 10 == 0 or idx == len(TARGETS) - 1:
+        print(f"  Solved {idx}/{len(TARGETS)-1} remaining waypoints...")
 
-    # --- Convert + resample ---
-    ik_configs_sim = [dh_to_sim(q) for q in ik_configs_dh]
-    configs_sim    = resample_to_n(ik_configs_sim, N_STEPS)
+# 2. Convert the full DH trajectory (approach + dense path) to CoppeliaSim joint space
+ik_configs_sim = [dh_to_sim(q) for q in ik_configs_dh]
 
-    # --- Send motion ---
-    move_count += 1
-    move_id = f'ik_pos_move_{move_count}'
+# 3. Resample the entire combined trajectory to match our desired movement duration
+N_STEPS = int(TARGET_DUR / DT)
+times   = [i * DT for i in range(N_STEPS)]
+configs_sim = resample_to_n(ik_configs_sim, N_STEPS)
 
-    print(f"Sending motion {move_count} ...")
-    dispatch(sim, configs_sim, times, move_id, gripper_vel=GRIPPER_VEL)
+# 4. Send the single continuous motion to CoppeliaSim
+move_id = 'waypoint_path_smoothed'
+print(f"\nSending full trajectory to CoppeliaSim (Duration: {TARGET_DUR}s)...")
+dispatch(sim, configs_sim, times, move_id, gripper_vel=GRIPPER_VEL)
 
-    print("  Moving ...", end='', flush=True)
-    wait_for_movement(sim, move_id)
-    print("\r  Done.")
+print("  Moving ...", end='', flush=True)
+wait_for_movement(sim, move_id)
+print("\r  Done.               ")
 
 sim.stopSimulation()
 print("Simulation stopped.")
