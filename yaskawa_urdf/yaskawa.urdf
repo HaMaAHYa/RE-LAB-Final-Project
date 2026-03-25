@@ -1,0 +1,198 @@
+<?xml version="1.0"?>
+<robot name="yaskawa">
+    <link name="robot_base">
+        <collision name="yaskawa">
+            <origin xyz="0.000000 0.000000 0.099508" rpy="0.000000 -1.570796 0.000000" />
+            <geometry>
+                <mesh filename="file:///home/thanakorn/Thanakorn/Works/University/3_2/RE_Lab/Final_Project/Assignment/yaskawa_urdf/yaskawa_robot_base_coll_1.dae" />
+            </geometry>
+        </collision>
+        <visual name="base_link_visual">
+            <origin xyz="0.000000 0.000000 0.099508" rpy="0.000000 -1.570796 0.000000" />
+            <geometry>
+                <mesh filename="file:///home/thanakorn/Thanakorn/Works/University/3_2/RE_Lab/Final_Project/Assignment/yaskawa_urdf/yaskawa_base_link_visual_vis_1.dae" />
+            </geometry>
+            <material name="base_link_visual_material">
+                <color rgba="0.000000 0.000000 0.000000 1.0" />
+            </material>
+        </visual>
+    </link>
+    <joint name="joint1" type="revolute">
+        <axis xyz="0 0 1" />
+        <limit velocity="7.9411997795105" effort="150.91999816895" upper="2.9670000076294" lower="-2.9670000076294" />
+        <parent link="robot_base" />
+        <child link="link_1_s_respondable" />
+        <origin xyz="0.018666 0.000230 0.330015" rpy="-3.141593 3.141593 -3.141593" />
+    </joint>
+    <link name="link_1_s_respondable">
+        <collision name="link_1_s_respondable">
+            <origin xyz="0.001908 -0.005243 -0.037941" rpy="3.135408 3.057547 1.544098" />
+            <geometry>
+                <mesh filename="file:///home/thanakorn/Thanakorn/Works/University/3_2/RE_Lab/Final_Project/Assignment/yaskawa_urdf/yaskawa_link_1_s_respondable_coll_1.dae" />
+            </geometry>
+        </collision>
+        <visual name="link_1_s_visual">
+            <origin xyz="0.001899 0.000000 -0.039549" rpy="-3.141593 3.141593 1.570796" />
+            <geometry>
+                <mesh filename="file:///home/thanakorn/Thanakorn/Works/University/3_2/RE_Lab/Final_Project/Assignment/yaskawa_urdf/yaskawa_link_1_s_visual_vis_1.dae" />
+            </geometry>
+            <material name="link_1_s_visual_material">
+                <color rgba="0.000000 0.000000 1.000000 1.0" />
+            </material>
+        </visual>
+    </link>
+    <joint name="joint2" type="revolute">
+        <axis xyz="0 0 1" />
+        <limit velocity="6.749499797821" effort="176.39999389648" upper="2.5307000875473" lower="-1.1344000101089" />
+        <parent link="link_1_s_respondable" />
+        <child link="link_2_l_respondable" />
+        <origin xyz="0.040000 0.000000 0.000000" rpy="1.570796 3.141593 -3.141593" />
+    </joint>
+    <link name="link_2_l_respondable">
+        <collision name="link_2_l_respondable">
+            <origin xyz="-0.017173 -0.166447 0.000000" rpy="1.570845 3.141593 3.109743" />
+            <geometry>
+                <mesh filename="file:///home/thanakorn/Thanakorn/Works/University/3_2/RE_Lab/Final_Project/Assignment/yaskawa_urdf/yaskawa_link_2_l_respondable_coll_1.dae" />
+            </geometry>
+        </collision>
+        <visual name="link_2_l_visual">
+            <origin xyz="-0.017029 -0.166476 0.000002" rpy="1.570847 3.141054 3.111189" />
+            <geometry>
+                <mesh filename="file:///home/thanakorn/Thanakorn/Works/University/3_2/RE_Lab/Final_Project/Assignment/yaskawa_urdf/yaskawa_link_2_l_visual_vis_1.dae" />
+            </geometry>
+            <material name="link_2_l_visual_material">
+                <color rgba="0.000000 0.000000 1.000000 1.0" />
+            </material>
+        </visual>
+    </link>
+    <joint name="joint3" type="revolute">
+        <axis xyz="0 0 1" />
+        <limit velocity="9.0756998062134" effort="107.55999755859" upper="3.3160998821259" lower="-1.2216999530792" />
+        <parent link="link_2_l_respondable" />
+        <child link="link_3_u_respondable" />
+        <origin xyz="0.000000 -0.345000 -0.000000" rpy="0.000001 3.141593 -3.141593" />
+    </joint>
+    <link name="link_3_u_respondable">
+        <collision name="link_3_u_respondable">
+            <origin xyz="-0.017483 0.024322 0.001500" rpy="0.000000 1.570796 0.000000" />
+            <geometry>
+                <mesh filename="file:///home/thanakorn/Thanakorn/Works/University/3_2/RE_Lab/Final_Project/Assignment/yaskawa_urdf/yaskawa_link_3_u_respondable_coll_1.dae" />
+            </geometry>
+        </collision>
+        <visual name="link_3_u_visual">
+            <origin xyz="-0.017483 0.024266 0.002039" rpy="1.570796 3.163836 -1.570796" />
+            <geometry>
+                <mesh filename="file:///home/thanakorn/Thanakorn/Works/University/3_2/RE_Lab/Final_Project/Assignment/yaskawa_urdf/yaskawa_link_3_u_visual_vis_1.dae" />
+            </geometry>
+            <material name="link_3_u_visual_material">
+                <color rgba="0.000000 0.000000 1.000000 1.0" />
+            </material>
+        </visual>
+    </link>
+    <joint name="joint4" type="revolute">
+        <axis xyz="0 0 1" />
+        <limit velocity="9.5993003845215" effort="55.860000610352" upper="3.3160998821259" lower="-3.3160998821259" />
+        <parent link="link_3_u_respondable" />
+        <child link="link_4_r_respondable" />
+        <origin xyz="0.340000 0.040000 -0.000000" rpy="1.570796 3.141592 -1.570796" />
+    </joint>
+    <link name="link_4_r_respondable">
+        <collision name="link_4_r_respondable">
+            <origin xyz="0.001099 0.000015 0.116250" rpy="-0.000005 3.141938 -3.128507" />
+            <geometry>
+                <mesh filename="file:///home/thanakorn/Thanakorn/Works/University/3_2/RE_Lab/Final_Project/Assignment/yaskawa_urdf/yaskawa_link_4_r_respondable_coll_1.dae" />
+            </geometry>
+        </collision>
+        <visual name="link_4_r_visual">
+            <origin xyz="0.001099 0.000015 0.116250" rpy="-0.000005 3.141938 -3.128507" />
+            <geometry>
+                <mesh filename="file:///home/thanakorn/Thanakorn/Works/University/3_2/RE_Lab/Final_Project/Assignment/yaskawa_urdf/yaskawa_link_4_r_visual_vis_1.dae" />
+            </geometry>
+            <material name="link_4_r_visual_material">
+                <color rgba="0.000000 0.000000 1.000000 1.0" />
+            </material>
+        </visual>
+    </link>
+    <joint name="joint5" type="revolute">
+        <axis xyz="0 0 1" />
+        <limit velocity="9.5993003845215" effort="32.680000305176" upper="2.3561000823975" lower="-2.3561000823975" />
+        <parent link="link_4_r_respondable" />
+        <child link="link_5_b_respondable" />
+        <origin xyz="-0.000000 -0.000000 -0.000000" rpy="1.570797 1.570796 0.000000" />
+    </joint>
+    <link name="link_5_b_respondable">
+        <collision name="link_5_b_respondable">
+            <origin xyz="0.019000 -0.000235 -0.000010" rpy="-1.570796 4.697342 -1.570796" />
+            <geometry>
+                <mesh filename="file:///home/thanakorn/Thanakorn/Works/University/3_2/RE_Lab/Final_Project/Assignment/yaskawa_urdf/yaskawa_link_5_b_respondable_coll_1.dae" />
+            </geometry>
+        </collision>
+        <visual name="link_5_b_visual">
+            <origin xyz="0.019000 -0.000289 -0.000005" rpy="-0.000000 -1.570796 0.000000" />
+            <geometry>
+                <mesh filename="file:///home/thanakorn/Thanakorn/Works/University/3_2/RE_Lab/Final_Project/Assignment/yaskawa_urdf/yaskawa_link_5_b_visual_vis_1.dae" />
+            </geometry>
+            <material name="link_5_b_visual_material">
+                <color rgba="0.000000 0.000000 1.000000 1.0" />
+            </material>
+        </visual>
+    </link>
+    <joint name="joint6" type="revolute">
+        <axis xyz="0 0 1" />
+        <limit velocity="17.48450088501" effort="22.540000915527" upper="6.2944002151489" lower="-6.2944002151489" />
+        <parent link="link_5_b_respondable" />
+        <child link="link_6_t_respondable" />
+        <origin xyz="-0.000000 0.000000 -0.000000" rpy="1.570796 3.141592 -1.570796" />
+    </joint>
+    <link name="link_6_t_respondable">
+        <collision name="link_6_t_respondable">
+            <origin xyz="-0.000010 0.000141 -0.073750" rpy="-0.815241 4.712386 -2.293704" />
+            <geometry>
+                <mesh filename="file:///home/thanakorn/Thanakorn/Works/University/3_2/RE_Lab/Final_Project/Assignment/yaskawa_urdf/yaskawa_link_6_t_respondable_coll_1.dae" />
+            </geometry>
+        </collision>
+        <visual name="link_6_t_visual">
+            <origin xyz="-0.000005 0.000080 -0.073750" rpy="-0.569369 4.712386 3.105397" />
+            <geometry>
+                <mesh filename="file:///home/thanakorn/Thanakorn/Works/University/3_2/RE_Lab/Final_Project/Assignment/yaskawa_urdf/yaskawa_link_6_t_visual_vis_1.dae" />
+            </geometry>
+            <material name="link_6_t_visual_material">
+                <color rgba="1.000000 1.000000 1.000000 1.0" />
+            </material>
+        </visual>
+    </link>
+    <joint name="joint_6_t_tool0" type="fixed">
+        <axis xyz="0 0 1" />
+        <parent link="link_6_t_respondable" />
+        <child link="tool0_visual" />
+        <origin xyz="-0.000000 -0.000000 -0.080000" rpy="-3.141341 4.712043 -0.000252" />
+    </joint>
+    <link name="tool0_visual">
+        <visual name="tool0_visual">
+            <origin xyz="-0.000000 -0.000000 0.000000" rpy="0.000000 -1.570796 0.000000" />
+            <geometry>
+                <box size="0.000500 0.000500 0.000500" />
+            </geometry>
+            <material name="tool0_visual_material">
+                <color rgba="1.000000 1.000000 1.000000 1.0" />
+            </material>
+        </visual>
+    </link>
+    <joint name="base_link_base" type="fixed">
+        <axis xyz="0 0 1" />
+        <parent link="robot_base" />
+        <child link="base_visual" />
+        <origin xyz="0.018666 0.000230 0.330015" rpy="0.000000 1.570796 0.000000" />
+    </joint>
+    <link name="base_visual">
+        <visual name="base_visual">
+            <origin xyz="0.000000 0.000000 0.000000" rpy="0.000000 -1.570796 0.000000" />
+            <geometry>
+                <box size="0.000500 0.000500 0.000500" />
+            </geometry>
+            <material name="base_visual_material">
+                <color rgba="1.000000 1.000000 1.000000 1.0" />
+            </material>
+        </visual>
+    </link>
+</robot>
