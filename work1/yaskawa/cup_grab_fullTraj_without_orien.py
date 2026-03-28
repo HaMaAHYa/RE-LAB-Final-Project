@@ -540,7 +540,11 @@ if __name__ == "__main__":
     
     print("  Rotating Joint 6...", end='', flush=True)
     wait_for_movement(sim, move_id_rot)
+<<<<<<< HEAD
     print("\r  Done.                                ")
+=======
+    print("\r  Done.                                 ")
+>>>>>>> f8336c8 (add small movement for linear conveyor)
     time.sleep(0.5)
 
 
