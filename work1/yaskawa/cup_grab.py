@@ -7,6 +7,7 @@ generates smooth trajectories, and sends them to CoppeliaSim.
 """
 
 from coppeliasim_zmqremoteapi_client import RemoteAPIClient
+import matplotlib.pyplot as plt
 import numpy as np
 import math
 import time
@@ -21,7 +22,9 @@ Pi = math.pi
 # Timing and Simulation Settings
 DT = 0.05               # Must match CoppeliaSim's simulation timestep
 IK_STEPS = 40           # Number of waypoints to generate for smooth paths
-GRIPPER_VEL = 0.0       # Gripper state: +0.04 = open, -0.04 = close, 0.0 = hold
+G_CLOSE = -0.04       # Gripper state: +0.04 = open, -0.04 = close, 0.0 = hold
+G_OPEN = 0.04        # Gripper state: +0.04 = open, -0.04 = close,
+G_HOLD = 0.0         # Gripper state: +0.04 = open, -0.04 = close, 0.0 = hold
 PLACE_DUR = 3.0         # How long each placing motion should take (seconds)
 
 # Yaskawa GP8 Classical DH Parameters [a, alpha, d, theta_offset]
@@ -214,24 +217,66 @@ TARGETS = [
     np.array([0.546247, -0.501349, 0.766561]),
 ]
 
-# A list of places the robot will deposit items, visited in order.
 PLACE_POSITIONS = [
-    np.array([0.865, 0.0, 0.7000]),   # First place position
-    np.array([0.015, 0.5, 0.7000]),   # Second place position
+    np.array([0.865, 0.0, 0.7100]),   
+    np.array([0.015, 0.5, 0.7100]),   
 ]
 
-TARGET_DUR = [i * DT for i in range(len(TARGETS))][-1] + 1.5
+# Time for Phase 1 (Approach) + Time for Phase 2 (Grabbing)
+APPROACH_DUR = IK_STEPS * DT
+GRAB_DUR = len(TARGETS) * DT
+
+TARGET_DUR = APPROACH_DUR + GRAB_DUR
 
 
 # =====================================================================
-# 2. ROBOT KINEMATICS (MATH)
+# 2. DATA LOGGING & MATH
 # =====================================================================
+
+# Global storage for graphs
+DATA_LOG = {
+    't': [],
+    'cup_pos': [], 'cup_vel': [],
+    'cup_ori': [], 'cup_omega': [],
+    'ee_pos': [], 'ee_vel': [],
+    'ee_ori': [], 'ee_omega': []
+}
+
+def log_simulation_data(sim, cup_handle, ee_handle):
+    """Samples the physical state of objects directly from CoppeliaSim."""
+    t = sim.getSimulationTime()
+    
+    # Avoid duplicate polling in the same simulation step
+    if len(DATA_LOG['t']) > 0 and t <= DATA_LOG['t'][-1]:
+        return
+
+    # Grab Cup Data
+    if cup_handle != -1:
+        cp = sim.getObjectPosition(cup_handle, sim.handle_world)
+        cv, cw = sim.getObjectVelocity(cup_handle)
+        co = sim.getObjectOrientation(cup_handle, sim.handle_world)
+    else:
+        cp, cv, cw, co = [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0]
+
+    # Grab End-Effector Data
+    if ee_handle != -1:
+        ep = sim.getObjectPosition(ee_handle, sim.handle_world)
+        ev, ew = sim.getObjectVelocity(ee_handle)
+        eo = sim.getObjectOrientation(ee_handle, sim.handle_world)
+    else:
+        ep, ev, ew, eo = [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0]
+
+    DATA_LOG['t'].append(t)
+    DATA_LOG['cup_pos'].append(cp)
+    DATA_LOG['cup_vel'].append(cv)
+    DATA_LOG['cup_ori'].append(co)
+    DATA_LOG['cup_omega'].append(cw)
+    DATA_LOG['ee_pos'].append(ep)
+    DATA_LOG['ee_vel'].append(ev)
+    DATA_LOG['ee_ori'].append(eo)
+    DATA_LOG['ee_omega'].append(ew)
 
 def dh_matrix(a, alpha, d, theta):
-    """
-    Creates a 4x4 Transformation Matrix based on Denavit-Hartenberg parameters.
-    This mathematical matrix describes how one robotic link connects to the next.
-    """
     ct, st = np.cos(theta), np.sin(theta)
     ca, sa = np.cos(alpha), np.sin(alpha)
     return np.array([
@@ -242,61 +287,37 @@ def dh_matrix(a, alpha, d, theta):
     ])
 
 def fk(q):
-    """
-    Forward Kinematics (FK).
-    Given 6 joint angles (q), this calculates exactly where the tip of the tool is in 3D space.
-    It chains the DH matrices together, from the base to the tool.
-    """
     T = np.eye(4)
     for i, (a, alpha, d, theta_off) in enumerate(DH_PARAMS):
         T = T @ dh_matrix(a, alpha, d, q[i] + theta_off)
     T = T @ T_TOOL
-    # Returns (position [x,y,z], rotation [3x3 matrix])
     return T[:3, 3].copy(), T[:3, :3].copy()
 
 def jacobian_pos(q, fd_eps=1e-7):
-    """
-    Calculates the 3x6 Positional Jacobian using Finite Difference.
-    The Jacobian tells us: "If I move joint `i` by a tiny amount, how much does the X, Y, Z position change?"
-    We do this by literally moving each joint a tiny bit (fd_eps) and measuring the difference.
-    """
     Jv = np.zeros((3, 6))
     for i in range(6):
         q_p, q_m = q.copy(), q.copy()
-        q_p[i] += fd_eps  # nudge joint forward
-        q_m[i] -= fd_eps  # nudge joint backward
+        q_p[i] += fd_eps  
+        q_m[i] -= fd_eps  
         p_p, _ = fk(q_p)
         p_m, _ = fk(q_m)
-        # Calculate slope/rate of change
         Jv[:, i] = (p_p - p_m) / (2 * fd_eps)
     return Jv
 
 def inverse_kinematics_pos(target_pos, initial_guess, max_iter=300, tol=1e-4, alpha=0.5, lambda_=0.01):
-    """
-    Inverse Kinematics (IK) - Position Only.
-    Given a desired 3D point (target_pos), guess what joint angles are needed.
-    It uses a method called "Damped Least Squares" which nudges the joints closer 
-    to the target repeatedly (in a loop) until it gets close enough (tol).
-    """
     q = np.array(initial_guess, dtype=float)
     for _ in range(max_iter):
         pos_curr, _ = fk(q)
-        error = target_pos - pos_curr          # How far are we from the target?
-
-        if np.linalg.norm(error) < tol:        # If error is practically zero, stop!
+        error = target_pos - pos_curr          
+        if np.linalg.norm(error) < tol:        
             break
-
         Jv    = jacobian_pos(q)                
-        # Damped Least Squares formula (lambda_ prevents errors when joints are fully stretched out)
         A     = Jv @ Jv.T + lambda_**2 * np.eye(3) 
         J_dls = Jv.T @ np.linalg.inv(A)       
-        
-        # Nudge the joint angles closer to the solution
         q     = q + alpha * (J_dls @ error)
     return q
 
 def dh_to_sim(q):
-    """Multiplies joint angles by the sign map so CoppeliaSim rotates them the right way."""
     return JOINT_SIGN * q
 
 
@@ -305,10 +326,6 @@ def dh_to_sim(q):
 # =====================================================================
 
 def resample_to_n(configs, n):
-    """
-    Takes a list of joint angles and stretches or compresses it to exactly `n` points
-    using linear interpolation. This is necessary to match the simulation's timestep.
-    """
     src = len(configs)
     if src == n:
         return configs
@@ -322,33 +339,17 @@ def resample_to_n(configs, n):
     return out
 
 def build_cartesian_trajectory(pos_start, pos_target, q_seed, n_ik=IK_STEPS):
-    """
-    Creates a straight line in 3D Cartesian space between two points.
-    Because the robot moves in arcs (joints), we have to solve IK for many
-    tiny points along this straight line to force the tool to move straight.
-    """
     configs = []
     q = q_seed.copy()
     for k in range(n_ik):
         t   = k / (n_ik - 1)
-        # S-Curve (5th-order polynomial): This makes the robot accelerate smoothly 
-        # from a stop, move fast in the middle, and decelerate smoothly at the end.
         s   = 6*t**5 - 15*t**4 + 10*t**3           
         pos = (1.0 - s) * pos_start + s * pos_target
-        
-        # Find the joint angles for this point on the line
         q   = inverse_kinematics_pos(pos, q)
         configs.append(q.copy())
-        print(f"  IK waypoint {k+1:3d}/{n_ik}  pos={np.round(pos,4)}  "
-              f"q_deg={np.round(np.degrees(q),2).tolist()}")
     return configs
 
 def build_joint_trajectory(q_start, q_target, n_steps=IK_STEPS):
-    """
-    Blends from one joint configuration to another smoothly. 
-    Unlike Cartesian paths, this does NOT guarantee a straight line for the tool tip,
-    but it is computationally much cheaper and faster because it doesn't need IK inside the loop.
-    """
     configs = []
     for k in range(n_steps):
         t = k / (n_steps - 1)
@@ -366,8 +367,8 @@ TARGET_ARM   = '/yaskawa'
 STR_SIGNAL   = TARGET_ARM + '_executedMovId'
 _exec_mov_id = 'notReady'
 
-def wait_for_movement(sim, move_id, timeout=60.0):
-    """Pauses the Python script until CoppeliaSim confirms the robot finished moving."""
+def wait_for_movement(sim, move_id, cup_handle, ee_handle, timeout=60.0):
+    """Pauses Python until the movement is done, polling logs in the background."""
     global _exec_mov_id
     _exec_mov_id = 'notReady'
     t0 = time.time()
@@ -377,13 +378,26 @@ def wait_for_movement(sim, move_id, timeout=60.0):
         s = sim.getStringSignal(STR_SIGNAL)
         if s is not None:
             _exec_mov_id = s.decode() if isinstance(s, bytes) else s
+            
+        # Perform continuous logging while we wait!
+        log_simulation_data(sim, cup_handle, ee_handle)
+        
         time.sleep(0.05)
 
 def dispatch(sim, configs_sim, times, move_id, gripper_vel=0.0):
-    """Packs the calculated joint arrays into a dictionary and sends them to CoppeliaSim."""
+    """
+    MODIFIED: Now accepts a list for gripper_vel, allowing the gripper 
+    state to change smoothly mid-movement.
+    """
     assert len(configs_sim) == len(times), "configs_sim length != times length"
     
-    # Pack data to send to the Lua child script
+    # If gripper_vel is a single number, stretch it to cover all steps.
+    # If it is already a list, use it directly.
+    if isinstance(gripper_vel, list):
+        g_list = [float(g) for g in gripper_vel]
+    else:
+        g_list = [float(gripper_vel)] * len(times)
+    
     md = {
         'id':      move_id,
         'type':    'pts',
@@ -394,11 +408,114 @@ def dispatch(sim, configs_sim, times, move_id, gripper_vel=0.0):
         'j4':      [float(q[3]) for q in configs_sim],
         'j5':      [float(q[4]) for q in configs_sim],
         'j6':      [float(q[5]) for q in configs_sim],
-        'gripper': [float(gripper_vel)] * len(times),
+        'gripper': g_list,
     }
     sim.callScriptFunction(f'remoteApi_movementDataFunction@{TARGET_ARM}', sim.scripttype_childscript, md)
     sim.callScriptFunction(f'remoteApi_executeMovement@{TARGET_ARM}', sim.scripttype_childscript, move_id)
 
+
+# =====================================================================
+# 6. PLOTTING FUNCTION
+# =====================================================================
+def plot_results():
+    print("\nGenerating Plots...")
+    t = np.array(DATA_LOG['t'])
+    if len(t) == 0:
+        print("No data logged to plot.")
+        return
+
+    cup_pos = np.array(DATA_LOG['cup_pos'])
+    cup_vel = np.array(DATA_LOG['cup_vel'])
+    cup_ori = np.array(DATA_LOG['cup_ori'])
+    cup_omega = np.array(DATA_LOG['cup_omega'])
+    
+    ee_pos = np.array(DATA_LOG['ee_pos'])
+    ee_vel = np.array(DATA_LOG['ee_vel'])
+    ee_ori = np.array(DATA_LOG['ee_ori'])
+    ee_omega = np.array(DATA_LOG['ee_omega'])
+
+    # -- 1. Cup Position and Velocity --
+    fig1, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8))
+    fig1.suptitle("1. Cup Trajectory over Time")
+    ax1.plot(t, cup_pos[:,0], label='X')
+    ax1.plot(t, cup_pos[:,1], label='Y')
+    ax1.plot(t, cup_pos[:,2], label='Z')
+    ax1.set_ylabel('Position (m)')
+    ax1.legend(); ax1.grid(True)
+
+    ax2.plot(t, cup_vel[:,0], label='Vx')
+    ax2.plot(t, cup_vel[:,1], label='Vy')
+    ax2.plot(t, cup_vel[:,2], label='Vz')
+    ax2.set_ylabel('Velocity (m/s)')
+    ax2.set_xlabel('Time (s)')
+    ax2.legend(); ax2.grid(True)
+
+    # -- 2. End-Effector Linear Trajectory --
+    fig2, (ax3, ax4) = plt.subplots(2, 1, figsize=(10, 8))
+    fig2.suptitle("2. End-Effector Linear Trajectory")
+    ax3.plot(t, ee_pos[:,0], label='X')
+    ax3.plot(t, ee_pos[:,1], label='Y')
+    ax3.plot(t, ee_pos[:,2], label='Z')
+    ax3.set_ylabel('Position (m)')
+    ax3.legend(); ax3.grid(True)
+
+    ax4.plot(t, ee_vel[:,0], label='Vx')
+    ax4.plot(t, ee_vel[:,1], label='Vy')
+    ax4.plot(t, ee_vel[:,2], label='Vz')
+    ax4.set_ylabel('Velocity (m/s)')
+    ax4.set_xlabel('Time (s)')
+    ax4.legend(); ax4.grid(True)
+
+    # -- 2b. End-Effector 3D Path --
+    fig3 = plt.figure(figsize=(8, 8))
+    ax5 = fig3.add_subplot(111, projection='3d')
+    fig3.suptitle("2b. End-Effector 3D Path")
+    ax5.plot(ee_pos[:,0], ee_pos[:,1], ee_pos[:,2], label='TCP Path', color='blue', linewidth=2)
+    ax5.set_xlabel('X (m)')
+    ax5.set_ylabel('Y (m)')
+    ax5.set_zlabel('Z (m)')
+    ax5.legend()
+
+    # -- 3. End-Effector Angular Trajectory --
+    fig4, (ax6, ax7) = plt.subplots(2, 1, figsize=(10, 8))
+    fig4.suptitle("3. End-Effector Angular Trajectory (Orientation & Omega)")
+    
+    # Unwrap angles to prevent jumpy charts from -180 to +180 flips
+    ee_ori_unwrapped = np.unwrap(ee_ori, axis=0) 
+
+    ax6.plot(t, np.degrees(ee_ori_unwrapped[:,0]), label='Alpha (Roll)')
+    ax6.plot(t, np.degrees(ee_ori_unwrapped[:,1]), label='Beta (Pitch)')
+    ax6.plot(t, np.degrees(ee_ori_unwrapped[:,2]), label='Gamma (Yaw)')
+    ax6.set_ylabel('Orientation (Degrees)')
+    ax6.legend(); ax6.grid(True)
+
+    ax7.plot(t, ee_omega[:,0], label='Omega X')
+    ax7.plot(t, ee_omega[:,1], label='Omega Y')
+    ax7.plot(t, ee_omega[:,2], label='Omega Z')
+    ax7.set_ylabel('Angular Vel (rad/s)')
+    ax7.set_xlabel('Time (s)')
+    ax7.legend(); ax7.grid(True)
+    
+    # -- 4. Cup Angular Trajectory --
+    fig5, (ax8, ax9) = plt.subplots(2, 1, figsize=(10, 8))
+    fig5.suptitle("4. Cup Angular Trajectory (Orientation & Omega)")
+    
+    cup_ori_unwrapped = np.unwrap(cup_ori, axis=0) 
+
+    ax8.plot(t, np.degrees(cup_ori_unwrapped[:,0]), label='Alpha (Roll)')
+    ax8.plot(t, np.degrees(cup_ori_unwrapped[:,1]), label='Beta (Pitch)')
+    ax8.plot(t, np.degrees(cup_ori_unwrapped[:,2]), label='Gamma (Yaw)')
+    ax8.set_ylabel('Orientation (Degrees)')
+    ax8.legend(); ax8.grid(True)
+
+    ax9.plot(t, cup_omega[:,0], label='Omega X')
+    ax9.plot(t, cup_omega[:,1], label='Omega Y')
+    ax9.plot(t, cup_omega[:,2], label='Omega Z')
+    ax9.set_ylabel('Angular Vel (rad/s)')
+    ax9.set_xlabel('Time (s)')
+    ax9.legend(); ax9.grid(True)
+
+    plt.show()
 
 # =====================================================================
 # 5. MAIN EXECUTION SCRIPT
@@ -410,15 +527,26 @@ if __name__ == "__main__":
     sim    = client.getObject('sim')
     joint_handles = [sim.getObject(f'{TARGET_ARM}/joint{i+1}') for i in range(6)]
 
-    # Calculate timestamps for the grabbing trajectory
+    # Fetch Handles for Logging
+    try:
+        cup_handle = sim.getObject('./Cup')
+    except:
+        cup_handle = -1
+        print("Warning: Object './Cup' not found. Cup data will be zeroed.")
+        
+    try:
+        # Defaulting to gripperEF; if named differently, change it here
+        ee_handle = sim.getObject('./gripperEF')
+    except:
+        ee_handle = -1
+        print("Warning: Object './gripperEF' not found. EE data will be zeroed.")
+
+
     N_STEPS = int(TARGET_DUR / DT)
     times   = [i * DT for i in range(N_STEPS)]
 
-    # Read the current physical state of the robot in the sim
     q_sim_current = np.array([sim.getJointPosition(h) for h in joint_handles])
     q_dh_current  = JOINT_SIGN * q_sim_current
-
-    # Calculate where the robot tip currently is in XYZ space based on joints
     pos_start, _ = fk(q_dh_current)
 
     # -----------------------------------------------------------------
@@ -441,26 +569,35 @@ if __name__ == "__main__":
         q_ik = inverse_kinematics_pos(target_pos, q_seed)
         ik_configs_dh.append(q_ik.copy())
         
-        q_seed = q_ik.copy() # Update seed so the next step solves faster
+        q_seed = q_ik.copy() 
         if idx % 10 == 0 or idx == len(TARGETS) - 1:
             print(f"  Solved {idx}/{len(TARGETS)-1} remaining waypoints...")
 
-    # Convert the DH angles back to Sim angles and stretch them to match the simulation timeframe
     ik_configs_sim = [dh_to_sim(q) for q in ik_configs_dh]
     configs_sim = resample_to_n(ik_configs_sim, N_STEPS)
+
+    # -----------------------------------------------------------------
+    # GRIPPER LOGIC: Calculate when to close the gripper
+    # -----------------------------------------------------------------
+    # We want it open/hold (0.0) until we finish the approach (reaching TARGETS[0]),
+    # and closed (-0.04) while sweeping through the rest of the TARGETS array.
+    
+    # In ik_configs_dh, TARGETS[0] happens exactly at index `IK_STEPS`.
+    fraction_to_target_0 = IK_STEPS / (len(ik_configs_dh) - 1)
+    split_index = int(fraction_to_target_0 * N_STEPS)
+
+    # Create dynamic gripper list: [0.0, ..., 0.0, -0.04, ..., -0.04]
+    dynamic_gripper = [G_HOLD] * split_index + [G_CLOSE] * (N_STEPS - split_index)
 
     # -----------------------------------------------------------------
     # Phase 3: Calculate Joint Space Trajectories for all Placing points
     # -----------------------------------------------------------------
     print("\n--- Phase 3: Calculating Joint Space Trajectories for Placing ---")
-    q_current_placing = ik_configs_dh[-1]  # Start placing from wherever the grab finished
+    q_current_placing = ik_configs_dh[-1]  
     all_placing_trajectories = []
 
     for i, target_pos in enumerate(PLACE_POSITIONS):
         print(f"  Calculating path for Placing Position {i+1}/{len(PLACE_POSITIONS)}...")
-        
-        # Solve IK exactly ONCE for the destination. 
-        # (We don't need a straight Cartesian line, just a point-to-point joint movement)
         q_target_placing = inverse_kinematics_pos(target_pos, q_current_placing)
         
         placing_configs_dh = build_joint_trajectory(q_current_placing, q_target_placing, n_steps=IK_STEPS)
@@ -470,14 +607,12 @@ if __name__ == "__main__":
         times_place   = [k * DT for k in range(N_STEPS_PLACE)]
         configs_sim_place = resample_to_n(placing_configs_sim, N_STEPS_PLACE)
         
-        # Save this path into our list of trajectories
         all_placing_trajectories.append({
             'configs': configs_sim_place,
             'times': times_place,
             'id': f'waypoint_path_placing_{i+1}'
         })
-        
-        q_current_placing = q_target_placing # Prepare start point for next loop iteration
+        q_current_placing = q_target_placing
 
     # -----------------------------------------------------------------
     # Phase 4: Execute Simulation
@@ -488,66 +623,87 @@ if __name__ == "__main__":
         time.sleep(0.1)
     print("Simulation running.") 
     
-    wait_for_movement(sim, 'ready')
+    wait_for_movement(sim, 'ready', cup_handle, ee_handle)
 
-    # Execute Grabbing
+    # Execute Grabbing (Gripper will close automatically after TARGETS[0])
     print(f"\nSending Grabbing trajectory to CoppeliaSim (Duration: {TARGET_DUR}s)...")
-    dispatch(sim, configs_sim, times, 'waypoint_path_grabbing', gripper_vel=GRIPPER_VEL)
+    dispatch(sim, configs_sim, times, 'waypoint_path_grabbing', gripper_vel=dynamic_gripper)
     print("  Moving to Grabbing State...", end='', flush=True)
-    wait_for_movement(sim, 'waypoint_path_grabbing')
+    wait_for_movement(sim, 'waypoint_path_grabbing', cup_handle, ee_handle)
     print("\r  Done.                         ")
 
-    # Execute Placing (Loop through all computed paths)
+    # Execute Placing (Keep gripper closed = G_CLOSE = -0.04)
     print(f"\n--- Executing {len(all_placing_trajectories)} Placing Trajectories ---")
     for i, traj in enumerate(all_placing_trajectories):
         move_id = traj['id']
         print(f"Sending Placing trajectory {i+1} to CoppeliaSim (Duration: {PLACE_DUR}s)...")
         
-        dispatch(sim, traj['configs'], traj['times'], move_id, gripper_vel=0.0)
+        dispatch(sim, traj['configs'], traj['times'], move_id, gripper_vel=G_CLOSE)
 
         print(f"  Moving to Placing Target {i+1}...", end='', flush=True)
-        wait_for_movement(sim, move_id)
+        wait_for_movement(sim, move_id, cup_handle, ee_handle)
         print("\r  Done.                         ")
+        time.sleep(0.5) 
         
-        time.sleep(0.5) # Optional slight pause between placements
-        
-    # Excute Rotation Placing
     # -----------------------------------------------------------------
     # Phase 5: Execute Rotation Placing
     # -----------------------------------------------------------------
     print("\n--- Executing Rotation Placing ---")
     
-    # 1. Set the target configuration (Keep all joints same, change J6 to -90 deg)
+    linearConveyor = sim.getObject('/conveyor')
+    LCpos = sim.getObjectPosition(linearConveyor, sim.handle_world)
+    alpha, beta, gamma = sim.getObjectOrientation(linearConveyor, sim.handle_world)
+    print(f"  Current Conveyor Position: {LCpos}, Orientation (radians): ({alpha:.2f}, {beta:.2f}, {gamma:.2f})")
+    
+    
+    TARGET_J5_DEG = alpha   
+    TARGET_J6_DEG = -beta
+    
     q_start_rot = q_current_placing.copy()
     q_target_rot = q_start_rot.copy()
-    q_target_rot[5] = -math.pi / 30
     
-    # 2. Build the smooth joint trajectory
+    q_target_rot[4] = TARGET_J5_DEG  # Joint 5 (index 4)
+    q_target_rot[5] = TARGET_J6_DEG  # Joint 6 (index 5)
+    
     rot_configs_dh = build_joint_trajectory(q_start_rot, q_target_rot, n_steps=IK_STEPS)
     rot_configs_sim = [dh_to_sim(q) for q in rot_configs_dh]
     
-    # 3. Calculate timing and stretch the path to match the simulation steps
-    ROT_DUR = 2.0  # Duration for the rotation (seconds)
+    ROT_DUR = 2.0  
     N_STEPS_ROT = int(ROT_DUR / DT)
     times_rot = [k * DT for k in range(N_STEPS_ROT)]
-    
     configs_sim_rot = resample_to_n(rot_configs_sim, N_STEPS_ROT)
     
-    # 4. Dispatch the movement to CoppeliaSim
     move_id_rot = 'waypoint_path_rot_placing'
     print(f"Sending Rotation trajectory to CoppeliaSim (Duration: {ROT_DUR}s)...")
-    dispatch(sim, configs_sim_rot, times_rot, move_id_rot, gripper_vel=0.0)
     
-    print("  Rotating Joint 6...", end='', flush=True)
-    wait_for_movement(sim, move_id_rot)
-<<<<<<< HEAD
-    print("\r  Done.                                ")
-=======
-    print("\r  Done.                                 ")
->>>>>>> f8336c8 (add small movement for linear conveyor)
+    # Send the rotation command while KEEPING THE GRIPPER CLOSED
+    dispatch(sim, configs_sim_rot, times_rot, move_id_rot, gripper_vel=G_CLOSE)
+    
+    print(f"  Rotating J5 to {TARGET_J5_DEG} rad and J6 to {TARGET_J6_DEG} rad...", end='', flush=True)
+    wait_for_movement(sim, move_id_rot, cup_handle, ee_handle)
+    print("\r  Done.                                                     ")
+    time.sleep(0.5)
+    
+    # --- NEW: OPEN GRIPPER AFTER ROTATION FINISHES ---
+    move_id_open = 'waypoint_path_open_gripper'
+    OPEN_DUR = 1.0  
+    N_STEPS_OPEN = int(OPEN_DUR / DT)
+    times_open = [k * DT for k in range(N_STEPS_OPEN)]
+    
+    # Create a stationary trajectory (staying exactly where we ended the rotation)
+    configs_sim_open = [configs_sim_rot[-1]] * N_STEPS_OPEN
+    
+    print(f"Sending Open Gripper command to CoppeliaSim (Duration: {OPEN_DUR}s)...")
+    dispatch(sim, configs_sim_open, times_open, move_id_open, gripper_vel=G_OPEN)
+    
+    print("  Opening Gripper...", end='', flush=True)
+    wait_for_movement(sim, move_id_open, cup_handle, ee_handle)
+    print("\r  Gripper Opened.                                           ")
     time.sleep(0.5)
 
-
-    # Stop
-    sim.stopSimulation()
-    print("\nSimulation stopped.")
+    if (input("\nPress Enter to stop the simulation...") is not None):
+        sim.stopSimulation()
+        print("\nSimulation stopped.")
+        
+    # Generate the requested graphs
+    plot_results()  
