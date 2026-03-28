@@ -510,6 +510,39 @@ if __name__ == "__main__":
         print("\r  Done.                         ")
         
         time.sleep(0.5) # Optional slight pause between placements
+        
+    # Excute Rotation Placing
+    # -----------------------------------------------------------------
+    # Phase 5: Execute Rotation Placing
+    # -----------------------------------------------------------------
+    print("\n--- Executing Rotation Placing ---")
+    
+    # 1. Set the target configuration (Keep all joints same, change J6 to -90 deg)
+    q_start_rot = q_current_placing.copy()
+    q_target_rot = q_start_rot.copy()
+    q_target_rot[5] = -math.pi / 30
+    
+    # 2. Build the smooth joint trajectory
+    rot_configs_dh = build_joint_trajectory(q_start_rot, q_target_rot, n_steps=IK_STEPS)
+    rot_configs_sim = [dh_to_sim(q) for q in rot_configs_dh]
+    
+    # 3. Calculate timing and stretch the path to match the simulation steps
+    ROT_DUR = 2.0  # Duration for the rotation (seconds)
+    N_STEPS_ROT = int(ROT_DUR / DT)
+    times_rot = [k * DT for k in range(N_STEPS_ROT)]
+    
+    configs_sim_rot = resample_to_n(rot_configs_sim, N_STEPS_ROT)
+    
+    # 4. Dispatch the movement to CoppeliaSim
+    move_id_rot = 'waypoint_path_rot_placing'
+    print(f"Sending Rotation trajectory to CoppeliaSim (Duration: {ROT_DUR}s)...")
+    dispatch(sim, configs_sim_rot, times_rot, move_id_rot, gripper_vel=0.0)
+    
+    print("  Rotating Joint 6...", end='', flush=True)
+    wait_for_movement(sim, move_id_rot)
+    print("\r  Done.                                ")
+    time.sleep(0.5)
+
 
     # Stop
     sim.stopSimulation()
