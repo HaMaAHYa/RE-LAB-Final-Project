@@ -1,6 +1,13 @@
 """
-Merged Script: Yaskawa GP8 Pick-and-Place + ArUco Vision Tracker
-Runs the robot logic in the main thread while processing vision in a background thread.
+Merged Script: Yaskawa GP8 Pick-and-Place + ArUco Vision Tracker + Visual Servoing + Flip + Pitch + Cartesian Move Down
+- Passively scans for markers 1, 2, 3, 4 during the main pick-and-place operation.
+- Saves the last known center coordinate.
+- Uses the saved center to visually servo ArUco 0 at the end of the sequence.
+- Flips Joint 4 (Wrist Roll).
+- Rotates Joint 5 (Wrist Pitch).
+- Moves the arm straight down to Z = +0.540 using a Cartesian linear trajectory.
+- Fully opens gripper and holds the exact live simulation position.
+- Retreats back on X, lifts up on Z, and returns Home via Cartesian space.
 """
 
 import os
@@ -71,6 +78,13 @@ _current_gripper_cmd  = G_HOLD
 _dynamic_gripper_list = None
 _dynamic_gripper_t0   = None
 
+# --- THREAD SHARED STATE FOR VISION ---
+vision_state_lock = threading.Lock()
+vision_state = {
+    'target_center': None, # (x, y) pixels of the center of 1,2,3,4
+    'id0_pos': None        # (x, y) pixels of ArUco 0
+}
+
 
 # =====================================================================
 # 2. ARUCO VISION THREAD FUNCTIONS
@@ -112,10 +126,6 @@ def detect_and_annotate(frame, detector):
     return frame, found_markers
 
 def vision_thread_worker(stop_event):
-    """
-    This function runs in a completely separate thread.
-    It creates its own ZMQ client to prevent cross-thread socket crashes.
-    """
     print("[Vision Thread] Connecting dedicated client...")
     client_vis = RemoteAPIClient()
     sim_vis = client_vis.getObject('sim')
@@ -132,24 +142,33 @@ def vision_thread_worker(stop_event):
 
     print("[Vision Thread] Started Tracking Window.")
     
-    # Run until the main thread tells us to stop
     while not stop_event.is_set():
         frame = get_image(sim_vis, sensor_handle)
         if frame is not None:
             annotated, marker_centers = detect_and_annotate(frame, detector)
             
-            # Optional: Calculate center if 4 markers are found
+            tgt_center = None
             valid_pts = [marker_centers[m] for m in [1, 2, 3, 4] if m in marker_centers]
             if len(valid_pts) == 4:
                 avg_x = sum(p[0] for p in valid_pts) // 4
                 avg_y = sum(p[1] for p in valid_pts) // 4
-                cv2.circle(annotated, (avg_x, avg_y), 5, (0, 0, 255), -1)
-                cv2.putText(annotated, "CENTER", (avg_x + 10, avg_y), 
+                tgt_center = (avg_x, avg_y)
+                
+            with vision_state_lock:
+                if tgt_center is not None:
+                    vision_state['target_center'] = tgt_center
+                vision_state['id0_pos'] = marker_centers.get(0, None)
+
+            with vision_state_lock:
+                draw_center = vision_state['target_center']
+            
+            if draw_center is not None:
+                cv2.circle(annotated, draw_center, 5, (0, 0, 255), -1)
+                cv2.putText(annotated, "SAVED TARGET", (draw_center[0] + 10, draw_center[1]), 
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
 
             cv2.imshow(WINDOW_NAME, annotated)
 
-        # Process GUI events and check for manual quit 'q'
         if cv2.waitKey(1) & 0xFF == ord('q'):
             print("[Vision Thread] Manual quit requested.")
             break
@@ -164,24 +183,22 @@ def vision_thread_worker(stop_event):
 def log_simulation_data(sim, cup_handle, ee_handle, joint_handles):
     global _current_gripper_cmd, _dynamic_gripper_list, _dynamic_gripper_t0
     t = sim.getSimulationTime()
-    if len(DATA_LOG['t']) > 0 and t <= DATA_LOG['t'][-1]:
-        return
+    if len(DATA_LOG['t']) > 0 and t <= DATA_LOG['t'][-1]: return
+    
+    cp, cv, cw, co = [0,0,0],[0,0,0],[0,0,0],[0,0,0]
     if cup_handle != -1:
         cp = sim.getObjectPosition(cup_handle, sim.handle_world)
         cv, cw = sim.getObjectVelocity(cup_handle)
         co = sim.getObjectOrientation(cup_handle, sim.handle_world)
-    else:
-        cp, cv, cw, co = [0,0,0],[0,0,0],[0,0,0],[0,0,0]
+        
+    ep, ev, ew, eo = [0,0,0],[0,0,0],[0,0,0],[0,0,0]
     if ee_handle != -1:
         ep = sim.getObjectPosition(ee_handle, sim.handle_world)
         ev, ew = sim.getObjectVelocity(ee_handle)
         eo = sim.getObjectOrientation(ee_handle, sim.handle_world)
-    else:
-        ep, ev, ew, eo = [0,0,0],[0,0,0],[0,0,0],[0,0,0]
-    if joint_handles:
-        jp = [sim.getJointPosition(h) for h in joint_handles]
-    else:
-        jp = [0.0] * 6
+        
+    jp = [sim.getJointPosition(h) for h in joint_handles] if joint_handles else [0.0] * 6
+    
     if _dynamic_gripper_list is not None and _dynamic_gripper_t0 is not None:
         idx = max(0, min(int((t - _dynamic_gripper_t0) / DT), len(_dynamic_gripper_list)-1))
         gripper_val = _dynamic_gripper_list[idx]
@@ -235,8 +252,7 @@ def inverse_kinematics_pos(target_pos, initial_guess, max_iter=300, tol=1e-4, al
         q = q + alpha * dq
     return q
 
-def dh_to_sim(q):
-    return JOINT_SIGN * q
+def dh_to_sim(q): return JOINT_SIGN * q
 
 def resample_to_n(configs, n):
     src = len(configs)
@@ -256,6 +272,17 @@ def build_joint_trajectory(q_start, q_target, n_steps=IK_STEPS):
         t = k / (n_steps - 1)
         s = 6*t**5 - 15*t**4 + 10*t**3
         configs.append((1.0 - s) * q_start + s * q_target)
+    return configs
+
+def build_cartesian_trajectory(pos_start, pos_target, q_seed, n_ik=IK_STEPS):
+    configs = []
+    q = q_seed.copy()
+    for k in range(n_ik):
+        t   = k / (n_ik - 1)
+        s   = 6*t**5 - 15*t**4 + 10*t**3            
+        pos = (1.0 - s) * pos_start + s * pos_target
+        q   = inverse_kinematics_pos(pos, q)
+        configs.append(q.copy())
     return configs
 
 # =====================================================================
@@ -318,17 +345,20 @@ def main():
             np.array(cup_pos),
         ]
     else:
-        PLACE_POSITIONS = [np.array([0,0,0])] # Failsafe
+        PLACE_POSITIONS = [np.array([0,0,0])]
 
     # Calculate Trajectories First
     print("\n--- Phase 3: Calculating Placing Trajectories ---")
+    
     q_sim_current = np.array([sim.getJointPosition(h) for h in joint_handles])
     q_dh_current  = JOINT_SIGN * q_sim_current
+    
+    q_home_dh = q_dh_current.copy() 
+    
     q_current_placing = q_dh_current.copy()
     all_placing_trajectories = []
 
     for i, target_pos in enumerate(PLACE_POSITIONS):
-        print(f"  Placing Position {i+1}/{len(PLACE_POSITIONS)}...")
         q_target_placing  = inverse_kinematics_pos(target_pos, q_current_placing)
         placing_configs   = build_joint_trajectory(q_current_placing, q_target_placing, n_steps=IK_STEPS)
         placing_sim       = [dh_to_sim(q) for q in placing_configs]
@@ -372,12 +402,10 @@ def main():
 
     # Execution Phase
     try:
-        print(f"\n--- Executing {len(all_placing_trajectories)} Placing Trajectories ---")
+        print(f"\n--- Executing Placing Trajectories ---")
         for i, traj in enumerate(all_placing_trajectories):
-            print(f"  Sending Placing {i+1} (Duration: {PLACE_DUR}s)...")
             dispatch(sim, traj['configs'], traj['times'], traj['id'], gripper_vel=G_HOLD)
             wait_for_movement(sim, traj['id'], cup_handle, ee_handle, joint_handles)
-            print("  Done.")
             time.sleep(0.5)
 
         print("\n--- Closing Gripper ---")
@@ -389,25 +417,235 @@ def main():
         
         dispatch(sim, close_configs, close_times, 'waypoint_path_close', gripper_vel=G_CLOSE)
         wait_for_movement(sim, 'waypoint_path_close', cup_handle, ee_handle, joint_handles)
-        print("  Gripper closed.")
         time.sleep(0.5)
 
         print("\n--- Lifting to Final Position ---")
         dispatch(sim, lift_trajectory['configs'], lift_trajectory['times'], lift_trajectory['id'], gripper_vel=G_CLOSE)
         wait_for_movement(sim, lift_trajectory['id'], cup_handle, ee_handle, joint_handles)
-        print("  Lift complete.")
         time.sleep(0.5)
+        
+        q_curr = q_target_lift.copy()
+
+        # ==========================================================
+        # PHASE 5 - VISUAL SERVOING (Using Memorized Target)
+        # ==========================================================
+        print("\n--- Phase 5: Vision-Based Centering ---")
+        
+        with vision_state_lock:
+            saved_target = vision_state['target_center']
+            
+        if saved_target is None:
+            print("  [Error] Could not execute visual servoing.")
+        else:
+            print(f"  [Vision] Using memorized target center: {saved_target}")
+            
+            PIXEL_TO_METER = 0.0005  
+            TOLERANCE_PX = 15        
+            MAX_ADJUSTMENTS = 20     
+            STEP_DURATION = 0.6      
+            CAMERA_AXIS_MAPPING = (1.0, 1.0) 
+
+            for step in range(MAX_ADJUSTMENTS):
+                with vision_state_lock:
+                    curr = vision_state['id0_pos']
+                
+                if curr is None:
+                    time.sleep(1.0)
+                    continue
+                    
+                err_x = saved_target[0] - curr[0]
+                err_y = saved_target[1] - curr[1]
+                dist = math.hypot(err_x, err_y)
+                
+                print(f"  Step {step+1}: Error = {dist:.1f}px (dx={err_x}, dy={err_y})")
+                
+                if dist <= TOLERANCE_PX:
+                    break
+                    
+                dx_world = err_x * PIXEL_TO_METER * CAMERA_AXIS_MAPPING[0]
+                dy_world = err_y * PIXEL_TO_METER * CAMERA_AXIS_MAPPING[1]
+                
+                p_curr, r_curr = fk(q_curr)
+                p_new = p_curr + np.array([dx_world, dy_world, 0.0])
+                q_new = inverse_kinematics_pos(p_new, q_curr)
+                
+                step_configs = build_joint_trajectory(q_curr, q_new, n_steps=10)
+                step_sim = [dh_to_sim(q) for q in step_configs]
+                
+                N_STEP = int(STEP_DURATION / DT)
+                resampled = resample_to_n(step_sim, N_STEP)
+                times = [k * DT for k in range(N_STEP)]
+                mov_id = f'vision_center_step_{step}'
+                
+                dispatch(sim, resampled, times, mov_id, gripper_vel=G_CLOSE)
+                wait_for_movement(sim, mov_id, cup_handle, ee_handle, joint_handles)
+                
+                q_curr = q_new.copy()
+                time.sleep(0.2) 
+
+        # ==========================================================
+        # PHASE 6 - ROTATE ONLY JOINT 4
+        # ==========================================================
+        print("\n--- Phase 6: Rotating Joint 4 ---")
+        
+        q_start_rot = q_curr.copy()
+        q_target_rot = q_start_rot.copy()
+        q_target_rot[3] = math.pi  
+        
+        rot_configs_dh = build_joint_trajectory(q_start_rot, q_target_rot, n_steps=IK_STEPS)
+        rot_configs_sim = [dh_to_sim(q) for q in rot_configs_dh]
+        
+        ROT_DUR = 2.0
+        N_STEPS_ROT = int(ROT_DUR / DT)
+        times_rot = [k * DT for k in range(N_STEPS_ROT)]
+        configs_sim_rot = resample_to_n(rot_configs_sim, N_STEPS_ROT)
+        move_id_rot = 'waypoint_path_rot_placing'
+        
+        dispatch(sim, configs_sim_rot, times_rot, move_id_rot, gripper_vel=G_CLOSE)
+        wait_for_movement(sim, move_id_rot, cup_handle, ee_handle, joint_handles)
+
+        # ==========================================================
+        # PHASE 7 - ROTATE ONLY JOINT 5
+        # ==========================================================
+        print("\n--- Phase 7: Rotating Joint 5 ---")
+        
+        q_start_pitch = q_target_rot.copy()
+        q_target_pitch = q_start_pitch.copy()
+        q_target_pitch[4] = math.pi / 8   
+        
+        pitch_configs_dh = build_joint_trajectory(q_start_pitch, q_target_pitch, n_steps=IK_STEPS)
+        pitch_configs_sim = [dh_to_sim(q) for q in pitch_configs_dh]
+        
+        PITCH_DUR = 2.0
+        N_STEPS_PITCH = int(PITCH_DUR / DT)
+        times_pitch = [k * DT for k in range(N_STEPS_PITCH)]
+        configs_sim_pitch = resample_to_n(pitch_configs_sim, N_STEPS_PITCH)
+        move_id_pitch = 'waypoint_path_pitch'
+        
+        dispatch(sim, configs_sim_pitch, times_pitch, move_id_pitch, gripper_vel=G_CLOSE)
+        wait_for_movement(sim, move_id_pitch, cup_handle, ee_handle, joint_handles)
+
+        # ==========================================================
+        # PHASE 8 - MOVE DOWN TO Z = +0.540 (CARTESIAN)
+        # ==========================================================
+        print("\n--- Phase 8: Moving Down to Z = +0.540 (Cartesian Space) ---")
+        
+        current_pos, _ = fk(q_target_pitch)
+        target_pos_down = np.array([current_pos[0] + 0.05, current_pos[1], 0.540])
+        
+        down_configs_dh = build_cartesian_trajectory(current_pos, target_pos_down, q_target_pitch, n_ik=IK_STEPS)
+        down_configs_sim = [dh_to_sim(q) for q in down_configs_dh]
+        
+        DOWN_DUR = 3.0
+        N_STEPS_DOWN = int(DOWN_DUR / DT)
+        times_down = [k * DT for k in range(N_STEPS_DOWN)]
+        configs_sim_down = resample_to_n(down_configs_sim, N_STEPS_DOWN)
+        move_id_down = 'waypoint_path_down'
+        
+        dispatch(sim, configs_sim_down, times_down, move_id_down, gripper_vel=G_CLOSE)
+        wait_for_movement(sim, move_id_down, cup_handle, ee_handle, joint_handles)
+        print("  Move down complete.")
+        
+        # !! THE FIX !! Read the EXACT live positions from the simulator
+        # This completely overwrites any mathematical misalignment.
+        q_sim_actual = np.array([sim.getJointPosition(h) for h in joint_handles])
+        q_dh_actual = JOINT_SIGN * q_sim_actual
+
+        # ==========================================================
+        # PHASE 9 - OPEN GRIPPER (NO SUDDEN MOVEMENT)
+        # ==========================================================
+        print("\n--- Phase 9: Fully Opening Gripper ---")
+        _current_gripper_cmd = G_OPEN
+        OPEN_DUR = 1.5   
+        N_OPEN = int(OPEN_DUR / DT)
+        
+        # Use the actual live positions read from Phase 8. 
+        # This is guaranteed not to jump.
+        open_configs_sim = [q_sim_actual] * N_OPEN
+        open_times   = [k * DT for k in range(N_OPEN)]
+        
+        dispatch(sim, open_configs_sim, open_times, 'waypoint_path_open', gripper_vel=G_OPEN)
+        wait_for_movement(sim, 'waypoint_path_open', cup_handle, ee_handle, joint_handles)
+        time.sleep(0.5) 
+        print("  Gripper fully open.")
+
+        # ==========================================================
+        # PHASE 10 - MOVE BACKWARD ON X-AXIS (CARTESIAN)
+        # ==========================================================
+        print("\n--- Phase 10: Retreating Backwards on X-axis ---")
+        
+        current_pos_post_drop, _ = fk(q_dh_actual)
+        target_pos_back = np.array([current_pos_post_drop[0] - 0.10, current_pos_post_drop[1], current_pos_post_drop[2]])
+        
+        back_configs_dh = build_cartesian_trajectory(current_pos_post_drop, target_pos_back, q_dh_actual, n_ik=IK_STEPS)
+        back_configs_sim = [dh_to_sim(q) for q in back_configs_dh]
+        
+        BACK_DUR = 2.0
+        N_STEPS_BACK = int(BACK_DUR / DT)
+        times_back = [k * DT for k in range(N_STEPS_BACK)]
+        configs_sim_back = resample_to_n(back_configs_sim, N_STEPS_BACK)
+        move_id_back = 'waypoint_path_back'
+        
+        dispatch(sim, configs_sim_back, times_back, move_id_back, gripper_vel=G_OPEN)
+        wait_for_movement(sim, move_id_back, cup_handle, ee_handle, joint_handles)
+        print("  Retreat complete.")
+        
+        q_dh_after_back = back_configs_dh[-1]
+
+        # ==========================================================
+        # PHASE 11 - LIFT UP ON Z-AXIS (CARTESIAN)
+        # ==========================================================
+        print("\n--- Phase 11: Lifting Up on Z-axis ---")
+        
+        current_pos_back, _ = fk(q_dh_after_back)
+        target_pos_up = np.array([current_pos_back[0], current_pos_back[1], current_pos_back[2] + 0.15])
+        
+        up_configs_dh = build_cartesian_trajectory(current_pos_back, target_pos_up, q_dh_after_back, n_ik=IK_STEPS)
+        up_configs_sim = [dh_to_sim(q) for q in up_configs_dh]
+        
+        UP_DUR = 2.0
+        N_STEPS_UP = int(UP_DUR / DT)
+        times_up = [k * DT for k in range(N_STEPS_UP)]
+        configs_sim_up = resample_to_n(up_configs_sim, N_STEPS_UP)
+        move_id_up = 'waypoint_path_up'
+        
+        dispatch(sim, configs_sim_up, times_up, move_id_up, gripper_vel=G_OPEN)
+        wait_for_movement(sim, move_id_up, cup_handle, ee_handle, joint_handles)
+        print("  Lift complete.")
+        
+        q_dh_after_up = up_configs_dh[-1]
+
+        # ==========================================================
+        # PHASE 12 - RETURN TO HOME POSITION (CARTESIAN)
+        # ==========================================================
+        print("\n--- Phase 12: Return to Home Position (Cartesian) ---")
+        
+        current_pos_up, _ = fk(q_dh_after_up)
+        target_pos_home, _ = fk(q_home_dh)
+        
+        home_configs_dh = build_cartesian_trajectory(current_pos_up, target_pos_home, q_dh_after_up, n_ik=IK_STEPS)
+        home_configs_sim = [dh_to_sim(q) for q in home_configs_dh]
+        
+        HOME_DUR = 4.0
+        N_STEPS_HOME = int(HOME_DUR / DT)
+        times_home = [k * DT for k in range(N_STEPS_HOME)]
+        configs_sim_home = resample_to_n(home_configs_sim, N_STEPS_HOME)
+        move_id_home = 'waypoint_path_home'
+        
+        dispatch(sim, configs_sim_home, times_home, move_id_home, gripper_vel=G_OPEN)
+        wait_for_movement(sim, move_id_home, cup_handle, ee_handle, joint_handles)
+        print("  Sequence completely finished.")
+
+        # ==========================================================
 
         input("\n[Execution Complete] Press Enter to stop the simulation and close windows...")
 
     except KeyboardInterrupt:
         print("\nProcess manually interrupted by user.")
     finally:
-        # CLEANUP: Stop the background thread, stop the sim
         print("\nShutting down...")
-        stop_vision_event.set()      # Tell vision loop to stop
-        vision_thread.join(timeout=2.0) # Wait for thread to close gracefully
-        
+        stop_vision_event.set()      
+        vision_thread.join(timeout=2.0) 
         sim.stopSimulation()
         print("Simulation stopped.")
 
