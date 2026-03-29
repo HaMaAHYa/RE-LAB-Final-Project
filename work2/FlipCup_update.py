@@ -509,51 +509,61 @@ if __name__ == "__main__":
         wait_for_movement(sim, move_id, cup_handle, ee_handle)
         print("\r  Done.                         ")
         time.sleep(0.5) 
-    # -----------------------------------------------------------------
-    # Phase 5: ULTRA-PRECISION CONTACT (Targeting < 0.0001m)
-    # -----------------------------------------------------------------
-    print("\n--- Phase 5: Ultra-Precision Contact ---")
-
-    # 1. Get exact current positions
-    cup_handle = 395 
-    CC = np.array(sim.getObjectPosition(cup_handle, sim.handle_world))
-    TCP_start = np.array(sim.getObjectPosition(ee_handle, sim.handle_world))
-
-    # 2. Tighten IK Solver for sub-millimeter precision
-    # We pass 'tol=1e-6' to force the solver to work until it's nearly perfect.
-    print(f"Calculating precision path to CC: {CC}...")
     
+    
+    # -----------------------------------------------------------------
+    # Phase 5: REAL-TIME PRECISION REACH (No Freeze)
+    # -----------------------------------------------------------------
+    print("\n--- Phase 5: Real-Time Precision Reach ---")
+
+    # 1. Capture current state
     q_sim_now = np.array([sim.getJointPosition(h) for h in joint_handles])
     q_dh_now = JOINT_SIGN * q_sim_now
+    TCP_start, _ = fk(q_dh_now)
+    
+    cup_handle = 395 
+    CC = np.array(sim.getObjectPosition(cup_handle, sim.handle_world))
 
-    # Generate path with higher iteration count and tighter tolerance
+    # 2. Simplified Trajectory (Fewer iterations to prevent freezing)
     configs_dh = []
     q_step = q_dh_now.copy()
-    for k in range(IK_STEPS):
-        t = k / (IK_STEPS - 1)
+    
+    # Reduced steps and iterations for speed
+    FAST_IK_STEPS = 20 
+    for k in range(FAST_IK_STEPS):
+        t = k / (FAST_IK_STEPS - 1)
         s = 6*t**5 - 15*t**4 + 10*t**3
         interp_pos = (1.0 - s) * TCP_start + s * CC
         
-        # Use a much smaller tolerance (1e-6) and more iterations (500)
-        q_step = inverse_kinematics_pos(interp_pos, q_step, max_iter=500, tol=1e-6)
+        # Lower max_iter to 100 to stop the 'freeze'
+        q_step = inverse_kinematics_pos(interp_pos, q_step, max_iter=100, tol=1e-5, alpha=0.3)
         configs_dh.append(q_step.copy())
 
-    # 3. Convert and Dispatch
+    # 3. Seamless Sync & Dispatch
     configs_sim = [dh_to_sim(q) for q in configs_dh]
-    CONTACT_DUR = 2.0  # Slower movement helps the physics engine settle
+    configs_sim[0] = q_sim_now 
+
+    CONTACT_DUR = 2.0 
     times_contact = [k * DT for k in range(int(CONTACT_DUR / DT))]
     final_configs = resample_to_n(configs_sim, len(times_contact))
     
-    dispatch(sim, final_configs, times_contact, 'ultra_precision_move', gripper_vel=G_CLOSE)
+    print(f"Moving to CC: {CC}...")
+    dispatch(sim, final_configs, times_contact, 'rt_reach', gripper_vel=G_CLOSE)
+    wait_for_movement(sim, 'rt_reach', cup_handle, ee_handle)
     
-    # 4. Final Verification
-    wait_for_movement(sim, 'ultra_precision_move', cup_handle, ee_handle)
-    
+    # 4. Final Diagnostic
     TCP_final = np.array(sim.getObjectPosition(ee_handle, sim.handle_world))
     final_dist = np.linalg.norm(TCP_final - CC)
     
-    print(f"FINAL READING -> TCP: {TCP_final} | CC: {CC}")
-    print(f"FINAL ERROR DISTANCE: {final_dist:.6f}m")
+    print(f"FINAL ERROR: {final_dist:.6f}m")
+
+    # 5. JOINT LIMIT CHECKER
+    print("\n--- Diagnostic: Joint State vs Limits ---")
+    for i, h in enumerate(joint_handles):
+        pos = np.degrees(sim.getJointPosition(h))
+        # Check if any joint is near typical limits (usually -180, 180 or similar)
+        print(f" Joint {i+1}: {pos:.2f}°")
+
     
     if (input("\nPress Enter to stop the simulation...") is not None):
         sim.stopSimulation()
