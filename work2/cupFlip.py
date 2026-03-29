@@ -16,7 +16,8 @@ import time
 # 1. USER CONFIGURATION & SETUP
 # =====================================================================
 # Move all settings up here so they are easy to find and change.
-
+client = RemoteAPIClient()
+sim    = client.getObject('sim')
 Pi = math.pi
 
 # Timing and Simulation Settings
@@ -51,182 +52,18 @@ T_TOOL = np.array([
 JOINT_SIGN = np.array([+1, +1, -1, +1, -1, +1], dtype=float)
 
 # ---------------- Waypoints ----------------
-
-# The precise path the robot will follow to grab the object (Position only: X, Y, Z)
-TARGETS = [
-    np.array([-0.032915, -0.887067, 0.486025]),
-    np.array([-0.03231, -0.882233, 0.48512]),
-    np.array([-0.031694, -0.877359, 0.484205]),
-    np.array([-0.031058, -0.872478, 0.483287]),
-    np.array([-0.030413, -0.867584, 0.48237]),
-    np.array([-0.029721, -0.862713, 0.481447]),
-    np.array([-0.028934, -0.857858, 0.480519]),
-    np.array([-0.028094, -0.852999, 0.47959]),
-    np.array([-0.027244, -0.848145, 0.478659]),
-    np.array([-0.026384, -0.843305, 0.477726]),
-    np.array([-0.025498, -0.838449, 0.476796]),
-    np.array([-0.024621, -0.833601, 0.475863]),
-    np.array([-0.023648, -0.828783, 0.474924]),
-    np.array([-0.022562, -0.823977, 0.473982]),
-    np.array([-0.021453, -0.819179, 0.473037]),
-    np.array([-0.020337, -0.814383, 0.472092]),
-    np.array([-0.019201, -0.809595, 0.471147]),
-    np.array([-0.018061, -0.804801, 0.470201]),
-    np.array([-0.016866, -0.800026, 0.469252]),
-    np.array([-0.015561, -0.795287, 0.4683]),
-    np.array([-0.014181, -0.790559, 0.467345]),
-    np.array([-0.012782, -0.78584, 0.466388]),
-    np.array([-0.011369, -0.781133, 0.465431]),
-    np.array([-0.009935, -0.776417, 0.464475]),
-    np.array([-0.008503, -0.771708, 0.463517]),
-    np.array([-0.006971, -0.767039, 0.462555]),
-    np.array([-0.005307, -0.762407, 0.461592]),
-    np.array([-0.003601, -0.757792, 0.460627]),
-    np.array([-0.001883, -0.753182, 0.459662]),
-    np.array([-0.000145, -0.74858, 0.458696]),
-    np.array([0.001601, -0.743976, 0.45773]),
-    np.array([0.00339, -0.739393, 0.456762]),
-    np.array([0.005307, -0.734868, 0.455793]),
-    np.array([0.007324, -0.730382, 0.454823]),
-    np.array([0.009373, -0.725911, 0.453853]),
-    np.array([0.01143, -0.721446, 0.452882]),
-    np.array([0.013506, -0.716983, 0.451912]),
-    np.array([0.015588, -0.712521, 0.450941]),
-    np.array([0.017769, -0.708118, 0.449968]),
-    np.array([0.020095, -0.703784, 0.448999]),
-    np.array([0.022485, -0.699487, 0.448029]),
-    np.array([0.02489, -0.695197, 0.447059]),
-    np.array([0.027313, -0.690917, 0.446089]),
-    np.array([0.029748, -0.68664, 0.445118]),
-    np.array([0.032217, -0.682381, 0.444148]),
-    np.array([0.03482, -0.678212, 0.443181]),
-    np.array([0.037557, -0.674124, 0.442218]),
-    np.array([0.040327, -0.670062, 0.441256]),
-    np.array([0.043105, -0.666005, 0.440292]),
-    np.array([0.045906, -0.661954, 0.439331]),
-    np.array([0.048711, -0.657911, 0.438367]),
-    np.array([0.051608, -0.653932, 0.437408]),
-    np.array([0.054644, -0.650062, 0.436456]),
-    np.array([0.057756, -0.646252, 0.435509]),
-    np.array([0.060887, -0.642457, 0.434562]),
-    np.array([0.064028, -0.638676, 0.433614]),
-    np.array([0.067197, -0.634895, 0.432668]),
-    np.array([0.07038, -0.63113, 0.431722]),
-    np.array([0.073671, -0.627479, 0.430783]),
-    np.array([0.077104, -0.623945, 0.429857]),
-    np.array([0.080566, -0.620448, 0.428932]),
-    np.array([0.084036, -0.61695, 0.428015]),
-    np.array([0.087525, -0.61347, 0.427143]),
-    np.array([0.091028, -0.609992, 0.426359]),
-    np.array([0.094594, -0.60659, 0.425705]),
-    np.array([0.098285, -0.603325, 0.425226]),
-    np.array([0.102058, -0.600156, 0.424948]),
-    np.array([0.10585, -0.597005, 0.424894]),
-    np.array([0.109646, -0.593869, 0.425085]),
-    np.array([0.113475, -0.590743, 0.425548]),
-    np.array([0.117305, -0.587619, 0.426302]),
-    np.array([0.121218, -0.584619, 0.427374]),
-    np.array([0.125259, -0.581778, 0.428789]),
-    np.array([0.129322, -0.57898, 0.430541]),
-    np.array([0.133397, -0.576187, 0.43264]),
-    np.array([0.137485, -0.573406, 0.435091]),
-    np.array([0.141587, -0.570641, 0.437898]),
-    np.array([0.145725, -0.567935, 0.441072]),
-    np.array([0.149943, -0.565361, 0.444624]),
-    np.array([0.154232, -0.562897, 0.448549]),
-    np.array([0.158533, -0.560453, 0.452834]),
-    np.array([0.162834, -0.558022, 0.457469]),
-    np.array([0.167167, -0.55561, 0.462454]),
-    np.array([0.1715, -0.553205, 0.467775]),
-    np.array([0.175881, -0.55091, 0.473434]),
-    np.array([0.180343, -0.548753, 0.47943]),
-    np.array([0.184831, -0.54666, 0.485735]),
-    np.array([0.189323, -0.544573, 0.492328]),
-    np.array([0.193825, -0.5425, 0.499195]),
-    np.array([0.198346, -0.540453, 0.50632]),
-    np.array([0.202882, -0.538442, 0.51369]),
-    np.array([0.207461, -0.536552, 0.521294]),
-    np.array([0.212092, -0.534765, 0.529117]),
-    np.array([0.216733, -0.533013, 0.537123]),
-    np.array([0.221371, -0.531269, 0.545286]),
-    np.array([0.226038, -0.529546, 0.553594]),
-    np.array([0.230705, -0.527842, 0.562016]),
-    np.array([0.235392, -0.526217, 0.570541]),
-    np.array([0.240124, -0.524708, 0.579158]),
-    np.array([0.244877, -0.523259, 0.587829]),
-    np.array([0.249633, -0.521824, 0.596525]),
-    np.array([0.254389, -0.52041, 0.605221]),
-    np.array([0.259178, -0.519019, 0.613902]),
-    np.array([0.263962, -0.517655, 0.622537]),
-    np.array([0.268762, -0.51639, 0.631115]),
-    np.array([0.2736, -0.515214, 0.639619]),
-    np.array([0.278439, -0.514071, 0.648011]),
-    np.array([0.283278, -0.512938, 0.656264]),
-    np.array([0.288132, -0.511828, 0.664365]),
-    np.array([0.293001, -0.510738, 0.672289]),
-    np.array([0.297865, -0.509707, 0.680018]),
-    np.array([0.30275, -0.50877, 0.687545]),
-    np.array([0.307654, -0.50788, 0.694844]),
-    np.array([0.312556, -0.50701, 0.701888]),
-    np.array([0.317454, -0.506159, 0.708659]),
-    np.array([0.322381, -0.505328, 0.715152]),
-    np.array([0.327303, -0.504519, 0.721342]),
-    np.array([0.332222, -0.503785, 0.727228]),
-    np.array([0.337163, -0.503127, 0.732804]),
-    np.array([0.342107, -0.502494, 0.738047]),
-    np.array([0.347048, -0.50187, 0.742945]),
-    np.array([0.351993, -0.501271, 0.747496]),
-    np.array([0.356962, -0.500691, 0.751696]),
-    np.array([0.361916, -0.500154, 0.755539]),
-    np.array([0.366872, -0.499686, 0.759034]),
-    np.array([0.371843, -0.499258, 0.76218]),
-    np.array([0.376813, -0.498846, 0.76497]),
-    np.array([0.381777, -0.498454, 0.767409]),
-    np.array([0.386759, -0.498081, 0.76951]),
-    np.array([0.391746, -0.49772, 0.771278]),
-    np.array([0.396718, -0.497418, 0.77273]),
-    np.array([0.401698, -0.497179, 0.77389]),
-    np.array([0.406682, -0.496957, 0.774762]),
-    np.array([0.411663, -0.496742, 0.775365]),
-    np.array([0.416647, -0.49655, 0.775725]),
-    np.array([0.421649, -0.496375, 0.775869]),
-    np.array([0.426637, -0.496232, 0.775823]),
-    np.array([0.431619, -0.496148, 0.775627]),
-    np.array([0.436608, -0.496102, 0.775315]),
-    np.array([0.441597, -0.496067, 0.774919]),
-    np.array([0.446582, -0.496049, 0.774479]),
-    np.array([0.451577, -0.496049, 0.774036]),
-    np.array([0.456582, -0.496059, 0.773597]),
-    np.array([0.461568, -0.496118, 0.773161]),
-    np.array([0.466553, -0.496234, 0.772737]),
-    np.array([0.471543, -0.496365, 0.772319]),
-    np.array([0.47653, -0.496503, 0.7719]),
-    np.array([0.481517, -0.496662, 0.771484]),
-    np.array([0.48652, -0.496839, 0.771074]),
-    np.array([0.491513, -0.497041, 0.770666]),
-    np.array([0.496492, -0.497299, 0.770266]),
-    np.array([0.501472, -0.4976, 0.769877]),
-    np.array([0.506453, -0.497912, 0.76949]),
-    np.array([0.511431, -0.498238, 0.769104]),
-    np.array([0.516418, -0.498582, 0.768723]),
-    np.array([0.521414, -0.498939, 0.768345]),
-    np.array([0.526386, -0.499344, 0.767972]),
-    np.array([0.531353, -0.499815, 0.767613]),
-    np.array([0.536321, -0.500314, 0.767261]),
-    np.array([0.541286, -0.500821, 0.76691]),
-    np.array([0.546247, -0.501349, 0.766561]),
-]
-
+cup = sim.getObject('./20cmHighWallL[1]/Cup/cup_pose')
+cup_pos = sim.getObjectPosition(cup, sim.handle_world)
+print(cup_pos)
 PLACE_POSITIONS = [
-    np.array([0.865, 0.0, 0.7100]),   
-    np.array([0.015, 0.5, 0.7100]),   
+    np.array([cup_pos[0] - 0.19, cup_pos[1], cup_pos[2]]),   
+    np.array(cup_pos),   
 ]
 
 # Time for Phase 1 (Approach) + Time for Phase 2 (Grabbing)
 APPROACH_DUR = IK_STEPS * DT
-GRAB_DUR = len(TARGETS) * DT
 
-TARGET_DUR = APPROACH_DUR + GRAB_DUR
+TARGET_DUR = APPROACH_DUR
 
 
 # =====================================================================
@@ -584,8 +421,7 @@ def plot_results():
 
 if __name__ == "__main__":
     print("--- Connecting to CoppeliaSim ---")
-    client = RemoteAPIClient()
-    sim    = client.getObject('sim')
+
     joint_handles = [sim.getObject(f'{TARGET_ARM}/joint{i+1}') for i in range(6)]
 
     # Fetch Handles for Logging
@@ -616,39 +452,11 @@ if __name__ == "__main__":
     ik_configs_dh = [q_dh_current.copy()]
     q_seed = q_dh_current.copy()
 
-    print("\n--- Phase 1: Calculating smooth Cartesian approach to the first waypoint ---")
-    approach_configs = build_cartesian_trajectory(pos_start, TARGETS[0], q_seed, n_ik=IK_STEPS)
-    ik_configs_dh.extend(approach_configs)
-    q_seed = approach_configs[-1].copy()
-
-    # -----------------------------------------------------------------
-    # Phase 2: Solve Inverse Kinematics for the dense grabbing path
-    # -----------------------------------------------------------------
-    print(f"\n--- Phase 2: Solving IK for the remaining {len(TARGETS)-1} waypoints ---")
-    for idx in range(1, len(TARGETS)):
-        target_pos = TARGETS[idx]
-        q_ik = inverse_kinematics_pos(target_pos, q_seed)
-        ik_configs_dh.append(q_ik.copy())
-        
-        q_seed = q_ik.copy() 
-        if idx % 10 == 0 or idx == len(TARGETS) - 1:
-            print(f"  Solved {idx}/{len(TARGETS)-1} remaining waypoints...")
-
-    ik_configs_sim = [dh_to_sim(q) for q in ik_configs_dh]
-    configs_sim = resample_to_n(ik_configs_sim, N_STEPS)
-
     # -----------------------------------------------------------------
     # GRIPPER LOGIC: Calculate when to close the gripper
     # -----------------------------------------------------------------
     # We want it open/hold (0.0) until we finish the approach (reaching TARGETS[0]),
     # and closed (-0.04) while sweeping through the rest of the TARGETS array.
-    
-    # In ik_configs_dh, TARGETS[0] happens exactly at index `IK_STEPS`.
-    fraction_to_target_0 = IK_STEPS / (len(ik_configs_dh) - 1)
-    split_index = int(fraction_to_target_0 * N_STEPS)
-
-    # Create dynamic gripper list: [0.0, ..., 0.0, -0.04, ..., -0.04]
-    dynamic_gripper = [G_HOLD] * split_index + [G_CLOSE] * (N_STEPS - split_index)
 
     # -----------------------------------------------------------------
     # Phase 3: Calculate Joint Space Trajectories for all Placing points
@@ -684,16 +492,6 @@ if __name__ == "__main__":
         time.sleep(0.1)
     print("Simulation running.") 
     
-    wait_for_movement(sim, 'ready', cup_handle, ee_handle)
-
-    # Execute Grabbing (Gripper will close automatically after TARGETS[0])
-    print(f"\nSending Grabbing trajectory to CoppeliaSim (Duration: {TARGET_DUR}s)...")
-    _dynamic_gripper_list = dynamic_gripper
-    _dynamic_gripper_t0   = sim.getSimulationTime()
-    dispatch(sim, configs_sim, times, 'waypoint_path_grabbing', gripper_vel=dynamic_gripper)
-    print("  Moving to Grabbing State...", end='', flush=True)
-    wait_for_movement(sim, 'waypoint_path_grabbing', cup_handle, ee_handle)
-    print("\r  Done.                         ")
     # Grabbing done — switch back to scalar tracking
     _dynamic_gripper_list = None
     _dynamic_gripper_t0   = None
@@ -705,73 +503,15 @@ if __name__ == "__main__":
         move_id = traj['id']
         print(f"Sending Placing trajectory {i+1} to CoppeliaSim (Duration: {PLACE_DUR}s)...")
         
-        dispatch(sim, traj['configs'], traj['times'], move_id, gripper_vel=G_CLOSE)
+        dispatch(sim, traj['configs'], traj['times'], move_id, gripper_vel=G_HOLD)
 
         print(f"  Moving to Placing Target {i+1}...", end='', flush=True)
         wait_for_movement(sim, move_id, cup_handle, ee_handle)
         print("\r  Done.                         ")
         time.sleep(0.5) 
-        
-    # -----------------------------------------------------------------
-    # Phase 5: Execute Rotation Placing
-    # -----------------------------------------------------------------
-    print("\n--- Executing Rotation Placing ---")
     
-    linearConveyor = sim.getObject('/conveyor')
-    LCpos = sim.getObjectPosition(linearConveyor, sim.handle_world)
-    alpha, beta, gamma = sim.getObjectOrientation(linearConveyor, sim.handle_world)
-    print(f"  Current Conveyor Position: {LCpos}, Orientation (radians): ({alpha:.2f}, {beta:.2f}, {gamma:.2f})")
-    
-    
-    TARGET_J5_DEG = alpha   
-    TARGET_J6_DEG = -beta
-    
-    q_start_rot = q_current_placing.copy()
-    q_target_rot = q_start_rot.copy()
-    
-    q_target_rot[4] = TARGET_J5_DEG  # Joint 5 (index 4)
-    q_target_rot[5] = TARGET_J6_DEG  # Joint 6 (index 5)
-    
-    rot_configs_dh = build_joint_trajectory(q_start_rot, q_target_rot, n_steps=IK_STEPS)
-    rot_configs_sim = [dh_to_sim(q) for q in rot_configs_dh]
-    
-    ROT_DUR = 2.0  
-    N_STEPS_ROT = int(ROT_DUR / DT)
-    times_rot = [k * DT for k in range(N_STEPS_ROT)]
-    configs_sim_rot = resample_to_n(rot_configs_sim, N_STEPS_ROT)
-    
-    move_id_rot = 'waypoint_path_rot_placing'
-    print(f"Sending Rotation trajectory to CoppeliaSim (Duration: {ROT_DUR}s)...")
-    
-    # Send the rotation command while KEEPING THE GRIPPER CLOSED
-    dispatch(sim, configs_sim_rot, times_rot, move_id_rot, gripper_vel=G_CLOSE)
-    
-    print(f"  Rotating J5 to {TARGET_J5_DEG} rad and J6 to {TARGET_J6_DEG} rad...", end='', flush=True)
-    wait_for_movement(sim, move_id_rot, cup_handle, ee_handle)
-    print("\r  Done.                                                     ")
-    time.sleep(0.5)
-    
-    # --- NEW: OPEN GRIPPER AFTER ROTATION FINISHES ---
-    move_id_open = 'waypoint_path_open_gripper'
-    OPEN_DUR = 1.0  
-    N_STEPS_OPEN = int(OPEN_DUR / DT)
-    times_open = [k * DT for k in range(N_STEPS_OPEN)]
-    
-    # Create a stationary trajectory (staying exactly where we ended the rotation)
-    configs_sim_open = [configs_sim_rot[-1]] * N_STEPS_OPEN
-    
-    print(f"Sending Open Gripper command to CoppeliaSim (Duration: {OPEN_DUR}s)...")
-    _current_gripper_cmd = G_OPEN
-    dispatch(sim, configs_sim_open, times_open, move_id_open, gripper_vel=G_OPEN)
-    
-    print("  Opening Gripper...", end='', flush=True)
-    wait_for_movement(sim, move_id_open, cup_handle, ee_handle)
-    print("\r  Gripper Opened.                                           ")
-    time.sleep(0.5)
-
     if (input("\nPress Enter to stop the simulation...") is not None):
         sim.stopSimulation()
         print("\nSimulation stopped.")
         
     # Generate the requested graphs
-    plot_results()
