@@ -590,10 +590,10 @@ if __name__ == "__main__":
 
     # Fetch Handles for Logging
     try:
-        cup_handle = sim.getObject('./Cup')
+        cup_handle = sim.getObject('./conveyorSystem/Cup')
     except:
         cup_handle = -1
-        print("Warning: Object './Cup' not found. Cup data will be zeroed.")
+        print("Warning: Object './conveyorSystem/Cup' not found. Cup data will be zeroed.")
         
     try:
         # Defaulting to gripperEF; if named differently, change it here

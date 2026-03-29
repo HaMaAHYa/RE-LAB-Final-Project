@@ -42,7 +42,7 @@ T_TOOL = np.array([
 JOINT_SIGN = np.array([+1, +1, -1, +1, -1, +1], dtype=float)
 WRIST_OFFSET = T_TOOL[2, 3]  # 0.01867 m
 
-cup = sim.getObject('./20cmHighWallL[1]/Cup/cup_pose')
+cup = sim.getObject('./Cup/cup_pose')
 cup_pos = sim.getObjectPosition(cup, sim.handle_world)
 print(cup_pos)
 PLACE_POSITIONS = [
