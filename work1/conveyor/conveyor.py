@@ -1,11 +1,8 @@
 from coppeliasim_zmqremoteapi_client import RemoteAPIClient
-#from zmqRemoteApi import RemoteAPIClient
-import numpy as np
-from mpl_toolkits import mplot3d
 import matplotlib.pyplot as plt
-import threading
-import getch
 import math
+import csv
+
 Pi = math.pi
 
 robotNum = 'GP8'
@@ -19,8 +16,7 @@ sim.setStepping(True)
 
 sim.startSimulation()
 
-cup=sim.getObject('./Cup')
-cup_acc_sensor = sim.getObject('./Accelerometer')
+cup=sim.getObject('./conveyorSystem/Cup')
 
 t = []
 # linear
@@ -193,29 +189,7 @@ def plot(t, cupPx, cupPy, cupPz, cupVx, cupVy, cupVz, cupP_alpha, cupP_beta, cup
 
     plt.show()
 
-    # plt.figure # acceleration
-    # plt.subplot(1,3,1)
-    # plt.title('t and acceleration x of the cup')
-    # plt.plot(t,cupAx, '--r')
-    # plt.xlabel('t(s)')
-    # plt.ylabel('m/s^2')
-    # plt.legend()
-    # plt.subplot(1,3,2)
-    # plt.title('t and acceleration y of the cup')
-    # plt.plot(t,cupAy, '--r')
-    # plt.xlabel('t(s)')
-    # plt.ylabel('m/s^2')
-    # plt.legend()
-    # plt.subplot(1,3,3)
-    # plt.title('t and acceleration z of the cup')
-    # plt.plot(t,cupAz, '--r')
-    # plt.xlabel('t(s)')
-    # plt.ylabel('m/s^2')
-    # plt.legend()
-    # plt.show()
 
-
-import csv
 
 # Create CSV file
 with open('conveyor/cup_trajectory_data.csv', 'w', newline='') as file:

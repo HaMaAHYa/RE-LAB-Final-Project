@@ -3,7 +3,7 @@ import numpy as np
 import math
 
 # 1. Load the CSV file
-df = pd.read_csv('../Assignment/conveyor/cup_trajectory_data.csv')
+df = pd.read_csv('/home/thanakorn/Thanakorn/Works/University/3_2/RE_Lab/Final_Project/Assignment/work1/conveyor/cup_trajectory_data.csv')
 
 start_time = 2.0
 end_time = 10.0
@@ -50,7 +50,7 @@ for index, row in filtered_df.iterrows():
     formatted_lines.append(line)
 
 # 4. Save the result to a text file
-output_path = f'Trajectory_Designer/extracted_xyz_{start_time}_to_{end_time}.csv'
+output_path = f'/home/thanakorn/Thanakorn/Works/University/3_2/RE_Lab/Final_Project/Assignment/work1/Trajectory_Designer/extracted_xyz_{start_time}_to_{end_time}.csv'
 
 with open(output_path, 'w') as f:
     for item in formatted_lines:
